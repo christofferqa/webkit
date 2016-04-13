@@ -27,6 +27,7 @@
 #define EventSender_h
 
 #include "Timer.h"
+#include "ThreadTimers.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -55,6 +56,8 @@ private:
     Timer<EventSender<T> > m_timer;
     Vector<T*> m_dispatchSoonList;
     Vector<T*> m_dispatchingList;
+    Vector<EventActionId> m_dispatchSoonCallers;
+    Vector<EventActionId> m_dispatchingCallers;
 };
 
 template<typename T> EventSender<T>::EventSender(const AtomicString& eventType)
@@ -66,6 +69,8 @@ template<typename T> EventSender<T>::EventSender(const AtomicString& eventType)
 template<typename T> void EventSender<T>::dispatchEventSoon(T* sender)
 {
     m_dispatchSoonList.append(sender);
+    m_dispatchSoonCallers.append(CurrentEventActionId());
+    // ActionLogFormat(ActionLog::WRITE_MEMORY, "EventSender:%p", static_cast<void*>(sender));
     if (!m_timer.isActive())
         m_timer.startOneShot(0);
 }
@@ -99,13 +104,24 @@ template<typename T> void EventSender<T>::dispatchPendingEvents()
     m_dispatchSoonList.checkConsistency();
 
     m_dispatchingList.swap(m_dispatchSoonList);
+    m_dispatchingCallers.swap(m_dispatchSoonCallers);
     size_t size = m_dispatchingList.size();
     for (size_t i = 0; i < size; ++i) {
         if (T* sender = m_dispatchingList[i]) {
             m_dispatchingList[i] = 0;
+            // SRL: Split event actions that process different events.
+            threadGlobalData().threadTimers().happensBefore().splitCurrentEventActionIfNotInScope(false);
+            if (m_dispatchingCallers[i] != CurrentEventActionId()) {
+            	threadGlobalData().threadTimers().happensBefore().addExplicitArc(
+            			m_dispatchingCallers[i], CurrentEventActionId());
+            }
+            // ActionLogFormat(ActionLog::READ_MEMORY, "EventSender:%p", static_cast<void*>(sender));
+            ActionLogScope s("dispatch-event");
             sender->dispatchPendingEvent(this);
         }
     }
+
+    m_dispatchingCallers.clear();
     m_dispatchingList.clear();
 }
 

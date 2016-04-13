@@ -51,6 +51,7 @@
 #include "SchemeRegistry.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
+#include <wtf/ActionLogReport.h>
 #include <wtf/CurrentTime.h>
 
 #if PLATFORM(QT)
@@ -96,6 +97,9 @@ PassRefPtr<MainResourceLoader> MainResourceLoader::create(Frame* frame)
 
 void MainResourceLoader::receivedError(const ResourceError& error)
 {
+	// SRL: Create a network response event action.
+	NetworkResponseScope instrumentNetworkResponse(this);
+
     // Calling receivedMainResourceError will likely result in the last reference to this object to go away.
     RefPtr<MainResourceLoader> protect(this);
     RefPtr<Frame> protectFrame(m_frame);
@@ -377,6 +381,11 @@ void MainResourceLoader::substituteMIMETypeFromPluginDatabase(const ResourceResp
 
 void MainResourceLoader::didReceiveResponse(const ResourceResponse& r)
 {
+	// SRL: Create a network response event action.
+	NetworkResponseScope instrumentNetworkResponse(this);
+	ActionLogScope instrumentNetworkResponseScope(
+			String::format("main_response %s", r.url().string().ascii().data()).ascii().data());
+
     if (documentLoader()->applicationCacheHost()->maybeLoadFallbackForMainResponse(request(), r))
         return;
 
@@ -513,6 +522,8 @@ void MainResourceLoader::didReceiveData(const char* data, int length, long long 
 
 void MainResourceLoader::didFinishLoading(double finishTime)
 {
+	// SRL: Create a network response event action.
+	StartNetworkResponseEvent();
     // There is a bug in CFNetwork where callbacks can be dispatched even when loads are deferred.
     // See <rdar://problem/6304600> for more details.
 #if !USE(CF)
@@ -545,6 +556,7 @@ void MainResourceLoader::didFinishLoading(double finishTime)
     ResourceLoader::didFinishLoading(finishTime);
 
     dl->applicationCacheHost()->finishedLoadingMainResource();
+    EndNetworkResponseEvent();
 }
 
 void MainResourceLoader::didFail(const ResourceError& error)
